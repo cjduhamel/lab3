@@ -1,14 +1,25 @@
-#!/usr/bin/env python3
 import sys, io
 import pandas as pd
 
-BATCH_SIZE = 20000  # be generous; batching by 1000 lines is tiny
+BATCH_SIZE = 20000 
+
+COLS = [
+    "From Bank", "Account", "To Bank", "Account.1",
+    "Amount Received", "Receiving Currency",
+    "Amount Paid", "Payment Currency",
+    "Payment Format", "Is Laundering"
+]
 
 COL_AP = "Amount Paid"
 COL_AR = "Amount Received"
-COL_TS = "Timestamp"  # optional; we drop it
+COL_TS = "Timestamp"  # optional; we drop it if present
 
 def process_batch(df: pd.DataFrame, write_header: bool) -> bool:
+    if not df.empty and df.columns.size >= 2:
+        mask_header = (df.iloc[:, 0].astype(str) == COLS[0]) & (df.iloc[:, 1].astype(str) == COLS[1])
+        if mask_header.any():
+            df = df[~mask_header]
+
     # drop duplicates and reset index
     df = df.drop_duplicates().reset_index(drop=True)
 
@@ -18,8 +29,7 @@ def process_batch(df: pd.DataFrame, write_header: bool) -> bool:
     # make sure required columns exist
     for c in (COL_AP, COL_AR):
         if c not in df.columns:
-            # nothing to do for this chunk
-            return write_header
+            return write_header  # nothing to do for this chunk
 
     # coerce to numeric safely
     df[COL_AP] = pd.to_numeric(df[COL_AP], errors="coerce")
@@ -27,14 +37,6 @@ def process_batch(df: pd.DataFrame, write_header: bool) -> bool:
 
     # drop rows missing amounts
     df = df.dropna(subset=[COL_AP, COL_AR])
-
-    # per-batch z-score with zero-std guard
-    for col in (COL_AP, COL_AR):
-        std = df[col].std()
-        if std and std != 0:
-            df[col] = (df[col] - df[col].mean()) / std
-        else:
-            df[col] = 0.0
 
     # write TSV to stdout; header only once per mapper
     df.to_csv(sys.stdout, sep="\t", index=False, header=write_header)
@@ -44,22 +46,21 @@ def process_batch(df: pd.DataFrame, write_header: bool) -> bool:
 def from_csv(lines, columns):
     text = "".join(lines)
     if not text.strip():
-        return None, columns
-    if columns is None:
-        # first chunk: infer header
-        df = pd.read_csv(io.StringIO(text), on_bad_lines="skip", low_memory=False)
-        columns = df.columns.tolist()
-    else:
-        # subsequent chunks: reuse header
-        df = pd.read_csv(io.StringIO(text), header=None, names=columns,
-                         on_bad_lines="skip", low_memory=False)
-    return df, columns
+        return None, COLS
+    df = pd.read_csv(
+        io.StringIO(text),
+        header=None,            
+        names=COLS,             
+        on_bad_lines="skip",
+        low_memory=False
+    )
+    return df, COLS
 
 def main():
     buf = []
     n = 0
     write_header = True
-    columns = None
+    columns = COLS 
 
     for line in sys.stdin:
         buf.append(line)

@@ -4,7 +4,7 @@ cur_key = None
 laundered_sum = 0.0
 
 def produce(k, total):
-    if k is not None:
+    if k is not None and total > 0.0:
         print(f"{k}\t{total}")
 
 for line in sys.stdin:
